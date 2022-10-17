@@ -9,6 +9,7 @@ on:
       - main
       - release/*
   workflow_dispatch: {}
+  workflow_call:
 defaults:
   run:
     working-directory: .
@@ -20,7 +21,7 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions/setup-python@v2
         with:
-          python-version: 3.8
+          python-version: 3.9
       - name: Cache pip
         uses: actions/cache@v2
         with:
