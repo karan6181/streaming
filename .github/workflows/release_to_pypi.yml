@@ -7,12 +7,12 @@ on:
 
 jobs:
   pre-commit:
-    uses: ./precommit.yaml@main
     name: pre-commit
+    uses: ./precommit.yaml@main
 
   pytest:
-    uses: ./pytest.yaml@main
     name: Pytest
+    uses: ./pytest.yaml@main
 
   build-n-publish:
     name: Build and publish to PyPI
@@ -33,11 +33,18 @@ jobs:
           python -m build
           twine check --strict dist/*
 
-      - name: Publish distribution to PyPI
-        uses: pypa/gh-action-pypi-publish@master
+      # - name: Publish distribution to PyPI
+      #   uses: pypa/gh-action-pypi-publish@master
+      #   with:
+      #     user: __token__
+      #     password: ${{ secrets.PYPI_API_TOKEN }}
+
+      - name: Publish distribution 📦 to Test PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
           user: __token__
-          password: ${{ secrets.PYPI_API_TOKEN }}
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+          repository_url: https://test.pypi.org/legacy/
 
       - name: Create GitHub Release
         id: create_release
