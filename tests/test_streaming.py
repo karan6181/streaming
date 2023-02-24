@@ -244,7 +244,8 @@ def test_multiple_dataset_instantiation(mds_dataset_dir: Any, shuffle_seed: tupl
     val_dataset = StreamingDataset(local=local_dir,
                                    remote=remote_dir,
                                    batch_size=batch_size,
-                                   shuffle_seed=shuffle_seed_val)
+                                   shuffle_seed=shuffle_seed_val,
+                                   shared_dir_seed=7654)
 
     # Build val DataLoader
     val_dataloader = DataLoader(dataset=val_dataset,

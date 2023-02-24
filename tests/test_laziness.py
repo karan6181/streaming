@@ -24,18 +24,18 @@ def test_laziness(remote_local: Tuple[str, str]):
             out.write(sample)
 
     # Verify __getitem__ accesses.
-    dataset = StreamingDataset(remote)
+    dataset = StreamingDataset(local=remote)
     for i in range(num_samples):
         sample = dataset[i]
         assert sample['value'] == i
 
     # Verify __iter__ -> __getitem__ accesses.
-    dataset = StreamingDataset(remote)
+    dataset = StreamingDataset(local=remote, shared_dir_seed=1234)
     for i, sample in zip(range(num_samples), dataset):
         assert sample['value'] == i
 
     # Verify __getitem__ downloads/accesses.
-    dataset = StreamingDataset(local, remote)
+    dataset = StreamingDataset(local=local, remote=remote, shared_dir_seed=5678)
     for i in range(num_samples):
         sample = dataset[i]
         assert sample['value'] == i
@@ -43,12 +43,12 @@ def test_laziness(remote_local: Tuple[str, str]):
     shutil.rmtree(local)
 
     # Verify __iter__ -> __getitem__ downloads/accesses.
-    dataset = StreamingDataset(local, remote)
+    dataset = StreamingDataset(local=local, remote=remote, shared_dir_seed=910)
     for i, sample in zip(range(num_samples), dataset):
         assert sample['value'] == i
 
     # Re-verify __getitem__ downloads/accesses.
-    dataset = StreamingDataset(local, remote)
+    dataset = StreamingDataset(local=local, remote=remote, shared_dir_seed=2468)
     for i in range(num_samples):
         sample = dataset[i]
         assert sample['value'] == i

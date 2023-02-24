@@ -3,17 +3,16 @@
 
 """A mid-epoch-resumable streaming pytorch IterableDataset."""
 
+import hashlib
 import json
 import os
 from enum import IntEnum
 from multiprocessing.shared_memory import SharedMemory
 from threading import Thread
-from time import sleep, time
+from time import sleep
 from typing import Any, Dict, Iterator, Optional, Tuple
 
 import numpy as np
-import torch
-import torch.distributed as dist
 from filelock import FileLock
 from numpy.typing import NDArray
 from torch.utils.data import IterableDataset
@@ -126,6 +125,7 @@ class StreamingDataset(IterableDataset):
             Defaults to ``None``, which is interpreted as the number of nodes of the initial run.
         batch_size (int, optional): Batch size of its DataLoader, which affects how the dataset is
             partitioned over the workers. Defaults to ``None``.
+        shared_dir_seed (int): Seed for shared directory across ranks in a node.
     """
 
     def __init__(self,
@@ -140,7 +140,8 @@ class StreamingDataset(IterableDataset):
                  validate_hash: Optional[str] = None,
                  shuffle_seed: int = 9176,
                  num_canonical_nodes: Optional[int] = None,
-                 batch_size: Optional[int] = None):
+                 batch_size: Optional[int] = None,
+                 shared_dir_seed: int = 8563):
         self.local = local
         self.remote = remote
         self.split = split or ''  # Empty string for os.path.join().
@@ -204,43 +205,22 @@ class StreamingDataset(IterableDataset):
         # Determine and distribute shuffle seed and shm prefix.
         seed_rng = np.random.default_rng(shuffle_seed)
         self.shuffle_seed = int(seed_rng.integers(1 << 60))
-        prefix_int = int(seed_rng.integers(1 << 24))
-        self._prefix = f'{prefix_int:06x}'
 
-        # Should be a unique shared directory per each StreamingDataset instantiation to avoid a conflict
-        # between a different StreamingDataset instance on a same machine.
-        start_time = time()
-        while True:
-            self._shared_dir = os.path.join(os.path.sep, 'tmp', 'streaming', self._prefix)
-            if os.path.exists(self._shared_dir):
-                prefix_int = int(seed_rng.integers(1 << 24))
-                self._prefix = f'{prefix_int:06x}'
-            else:
-                break
-            elapsed = time() - start_time
-            # Raise an exception if not finding a unique shared directory in 60 secs
-            if elapsed > 60:
-                raise RuntimeError(''.join([
-                    f'Could not find the unique shared directory, bailing out.',
-                    'Please provide a different `shuffle_seed` value.'
-                ]))
-
-            sleep(TICK)
-
-        # Initialize the distributed package and synchronize all the ranks
-        is_dist_pg_initialized = False
-        if self._rank_world.num_ranks > 1:
-            if dist.is_available() and not dist.is_initialized():
-                is_dist_pg_initialized = True
-                dist.init_process_group(backend='nccl' if torch.cuda.is_available() and
-                                        dist.is_nccl_available() else 'gloo',
-                                        rank=world.rank,
-                                        world_size=world.num_ranks)
-            dist.barrier()
+        # Should be a unique shared directory per each StreamingDataset instantiation to avoid a
+        # conflict between a different StreamingDataset instance on a same machine.
+        shared_dir_prefix = str(shared_dir_seed) + str(split)
+        shared_dir_prefix = hashlib.md5(shared_dir_prefix.encode()).hexdigest()
+        self._shared_dir_prefix = shared_dir_prefix[:9]
+        self._shared_dir = os.path.join(os.path.sep, 'tmp', 'streaming', self._shared_dir_prefix)
+        if os.path.exists(self._shared_dir):
+            raise ValueError(''.join([
+                f'`shared_dir_seed` already exists.',
+                'Please provide a different `shared_dir_seed` value.'
+            ]))
 
         # Create the shared memory-backed worker barrier, without its lock, which is unpickleable.
         worker_barrier_filelock_path = os.path.join(self._shared_dir, 'barrier_filelock')
-        worker_barrier_shm_path = f'{self._prefix}_barrier'
+        worker_barrier_shm_path = f'{self._shared_dir_prefix}_barrier'
         self._worker_barrier = SharedBarrier(worker_barrier_filelock_path, worker_barrier_shm_path,
                                              world.is_local_leader)
 
@@ -252,7 +232,7 @@ class StreamingDataset(IterableDataset):
         # Note: we do not assume that the end of __iter__() will ever be reached, so we need to
         # increment the epoch counter at the start of __iter__() instead of at the end, so we need
         # to track what the next epoch is, not the current epoch.
-        self._next_epoch_shm = create_shared_memory(name=f'{self._prefix}_next_epoch',
+        self._next_epoch_shm = create_shared_memory(name=f'{self._shared_dir_prefix}_next_epoch',
                                                     size=np.int64().nbytes)
         self._next_epoch_arr = np.ndarray(1, buffer=self._next_epoch_shm.buf, dtype=np.int64)
         self._next_epoch_arr[0] = 0
@@ -262,12 +242,8 @@ class StreamingDataset(IterableDataset):
 
         # Create or attach shard_states array (tells if each shard is unknown, downloading, or
         # downloaded).
-        self._shard_states = create_shared_memory(name=f'{self._prefix}_shard_states',
+        self._shard_states = create_shared_memory(name=f'{self._shared_dir_prefix}_shard_states',
                                                   size=len(self.shard_sizes) * np.uint8(0).nbytes)
-
-        # Destroy process group, and de-initialize the distributed package
-        if is_dist_pg_initialized:
-            dist.destroy_process_group()
 
     @property
     def next_epoch(self) -> int:
@@ -315,7 +291,7 @@ class StreamingDataset(IterableDataset):
             Tuple[int, int]: What epoch this is, and sample offset in that epoch.
         """
         # Get the resume state, if it exists.
-        name = f'{self._prefix}_resume'
+        name = f'{self._shared_dir_prefix}_resume'
         try:
             shm = SharedMemory(name)
         except FileNotFoundError:
@@ -807,7 +783,7 @@ class StreamingDataset(IterableDataset):
         Args:
             obj (Dict[str, Any]): The state.
         """
-        name = f'{self._prefix}_resume'
+        name = f'{self._shared_dir_prefix}_resume'
         data = json.dumps(obj, sort_keys=True).encode('utf-8')
         try:
             # some platforms choose to allocate chunks of memory based upon that platform’s memory
