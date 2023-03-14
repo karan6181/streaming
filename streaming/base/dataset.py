@@ -3,6 +3,7 @@
 
 """A mid-epoch-resumable streaming pytorch IterableDataset."""
 
+import atexit
 import json
 import os
 from enum import IntEnum
@@ -10,6 +11,7 @@ from multiprocessing.shared_memory import SharedMemory
 from threading import Thread
 from time import sleep, time
 from typing import Any, Dict, Iterator, Optional, Tuple
+from multiprocessing import resource_tracker
 
 import numpy as np
 import torch
@@ -24,7 +26,7 @@ from streaming.base.format.base.reader import FileInfo
 from streaming.base.hashing import get_hash
 from streaming.base.index import Index, get_index_basename
 from streaming.base.partitioning import get_partitions
-from streaming.base.shared import SharedBarrier, create_shared_memory
+from streaming.base.shared import SharedBarrier, create_shared_memory, CreateSharedMemory
 from streaming.base.shuffle import get_shuffle
 from streaming.base.storage import download_file
 from streaming.base.util import wait_for_file_to_exist, wait_for_local_leader
@@ -146,7 +148,8 @@ class StreamingDataset(IterableDataset):
                  num_canonical_nodes: Optional[int] = None,
                  batch_size: Optional[int] = None,
                  partition_algo: str = 'orig',
-                 shuffle_algo: str = 'py2s') -> None:
+                 shuffle_algo: str = 'py2s',
+                 prefix_int: int = 1234) -> None:
         self.local = local
         self.remote = remote
         self.split = split or ''  # Empty string for os.path.join().
@@ -158,6 +161,9 @@ class StreamingDataset(IterableDataset):
         self.validate_hash = validate_hash or None
         self.partition_algo = partition_algo
         self.shuffle_algo = shuffle_algo
+        self.prefix_int = prefix_int
+
+        print(f'PID: {os.getpid()}, PPID: {os.getppid()}')
 
         if self.download_retry < 0:
             raise ValueError('Parameter ``download_retry`` must be non-negative')
@@ -178,6 +184,8 @@ class StreamingDataset(IterableDataset):
         # different values for these fields. We are saving the rank World here because we cannot
         # instantiate a World inside the StreamingDataset destructor.
         self._rank_world = world = World()
+
+        # atexit.register(close, world, self)
 
         # Seed is set below.
         self.num_canonical_nodes = num_canonical_nodes
@@ -212,11 +220,24 @@ class StreamingDataset(IterableDataset):
         # Determine and distribute shuffle seed and shm prefix.
         seed_rng = np.random.default_rng(shuffle_seed)
         self.shuffle_seed = int(seed_rng.integers(1 << 60))
-        prefix_int = int(seed_rng.integers(1 << 24))
+        # prefix_int = int(seed_rng.integers(1 << 24))
+        prefix_int = int(seed_rng.integers(self.prefix_int))
         self._prefix = f'{prefix_int:06x}'
+        print('#' * 30)
+        print(f'{world.num_ranks=}')
+        print(f'{world.rank=}')
+        print(f'{self._prefix=}')
+        print('#' * 30)
+        self._shared_dir = os.path.join(os.path.sep, 'tmp', 'streaming', self._prefix)
 
         # Should be a unique shared directory per each StreamingDataset instantiation to avoid a
         # conflict between a different StreamingDataset instance on a same machine.
+        
+        #import pdb
+        #pdb.set_trace()
+        #sleep(3)
+
+        """
         start_time = time()
         while True:
             self._shared_dir = os.path.join(os.path.sep, 'tmp', 'streaming', self._prefix)
@@ -238,6 +259,7 @@ class StreamingDataset(IterableDataset):
         # Initialize the distributed package and synchronize all the ranks
         is_dist_pg_initialized = False
         if self._rank_world.num_ranks > 1:
+            print(f'streaming dist')
             if dist.is_available() and not dist.is_initialized():
                 is_dist_pg_initialized = True
                 dist.init_process_group(backend='nccl' if torch.cuda.is_available() and
@@ -246,6 +268,7 @@ class StreamingDataset(IterableDataset):
                                         world_size=world.num_ranks)
             dist.barrier()
 
+        """
         # Create the shared memory-backed worker barrier, without its lock, which is unpickleable.
         worker_barrier_filelock_path = os.path.join(self._shared_dir, 'barrier_filelock')
         worker_barrier_shm_path = f'{self._prefix}_barrier'
@@ -260,8 +283,12 @@ class StreamingDataset(IterableDataset):
         # Note: we do not assume that the end of __iter__() will ever be reached, so we need to
         # increment the epoch counter at the start of __iter__() instead of at the end, so we need
         # to track what the next epoch is, not the current epoch.
-        self._next_epoch_shm = create_shared_memory(name=f'{self._prefix}_next_epoch',
+        # self._next_epoch_shm, self.captain_rank = create_shared_memory(name=f'{self._prefix}_next_epoch',
+                                                    # size=np.int64().nbytes, rank=world.rank)
+        obj = CreateSharedMemory(name=f'{self._prefix}_next_epoch',
                                                     size=np.int64().nbytes)
+        self._next_epoch_shm = obj._shm
+        #resource_tracker.unregister(self._next_epoch_shm._name, 'shared_memory')
         self._next_epoch_arr = np.ndarray(1, buffer=self._next_epoch_shm.buf, dtype=np.int64)
         self._next_epoch_arr[0] = 0
 
@@ -270,12 +297,18 @@ class StreamingDataset(IterableDataset):
 
         # Create or attach shard_states array (tells if each shard is unknown, downloading, or
         # downloaded).
-        self._shard_states = create_shared_memory(name=f'{self._prefix}_shard_states',
+        # self._shard_states, self.captain_rank = create_shared_memory(name=f'{self._prefix}_shard_states',
+                                                #   size=len(self.shard_sizes) * np.uint8(0).nbytes, rank=world.rank)
+        obj = CreateSharedMemory(name=f'{self._prefix}_shard_states',
                                                   size=len(self.shard_sizes) * np.uint8(0).nbytes)
+        self._shard_states = obj._shm
+        #resource_tracker.unregister(self._shard_states._name, 'shared_memory')
 
+        """
         # Destroy process group, and de-initialize the distributed package
         if is_dist_pg_initialized:
             dist.destroy_process_group()
+        """
 
     @property
     def next_epoch(self) -> int:
@@ -837,16 +870,44 @@ class StreamingDataset(IterableDataset):
         """
         if shm is not None:
             # Close each SharedMemory instance
-            shm.close()
+            if self.captain_rank == world.rank:
+                print(f'Karan {world.rank=}')
+                #shm.close()
+                try:
+                    shm.close()
+                    shm.unlink()
+                except KeyError:
+                    print('I am in the except block')
+                    # Calling del second time from main process
+                    pass
+            else:
+                shm.close()
+                resource_tracker.unregister(shm._name, 'shared_memory')
+
+            """
+            try:
+                shm.close()
+                shm.unlink()
+            except FileNotFoundError:
+                pass
+            """
+            """
             if world.is_local_leader:
                 # Call unlink only once to release the shared memory
-                shm.unlink()
+                try:
+                    shm.unlink()
+                except FileNotFoundError:
+                    # File already released
+                    pass
             else:
                 # Wait for local leader process to execute first
                 sleep(1)
+            """
 
+    """
     def __del__(self):
         # Wait for the local rank 0 process
+        print(f'calling del streamingdataset')
         world = self._rank_world
         wait_for_local_leader(world)
 
@@ -857,3 +918,21 @@ class StreamingDataset(IterableDataset):
             self._cleanup_shared_memory(self._shard_states, world)
         if hasattr(self, '_resume_shm'):
             self._cleanup_shared_memory(self._resume_shm, world)
+    """
+
+# def close(world, dataset):
+    #world = world._rank_world
+    #wait_for_local_leader(world)
+    # print(f'Rank {world.rank} PID: {os.getpid()} PPID: {os.getppid()}: calling del streamingdataset')
+
+    # Clean up shared memory resources
+    # if hasattr(dataset, '_next_epoch_shm'):
+    #     dataset._cleanup_shared_memory(dataset._next_epoch_shm, world)
+    #     delattr(dataset, '_next_epoch_shm')
+    # if hasattr(dataset, '_shard_states'):
+    #     dataset._cleanup_shared_memory(dataset._shard_states, world)
+    #     delattr(dataset, '_shard_states')
+
+    # if hasattr(dataset, '_resume_shm'):
+    #     dataset._cleanup_shared_memory(dataset._resume_shm, world)
+    #     delattr(dataset, '_resume_shm')

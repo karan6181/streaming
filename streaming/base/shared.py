@@ -7,9 +7,11 @@ For when using `threading` or `multiprocessing` from the python standard library
 we are coordinating separately instantiated pytorch worker processes.
 """
 
+import atexit
 import os
 import shutil
 from multiprocessing.shared_memory import SharedMemory
+from multiprocessing import resource_tracker
 from time import sleep
 from typing import Optional
 
@@ -37,9 +39,11 @@ class SharedBarrier:
     """
 
     def __init__(self, filelock_path: str, shm_path: str, is_local_leader: bool) -> None:
+        print("Create SharedBarrier")
         self.is_local_leader = is_local_leader
         self.filelock_path = filelock_path
-        self.shm_path = shm_path
+        self.created_shms = []
+        self.opened_shms = []
 
         # Create three int32 fields in shared memory: num_enter, num_exit, flag.
         size = 3 * np.int32(0).nbytes
@@ -47,36 +51,50 @@ class SharedBarrier:
         try:
             # Creates a new shared memory block
             self._shm = SharedMemory(shm_path, True, size)
+            self.created_shms.append(self._shm)
         except FileExistsError:
             sleep(TICK)
             # Attaches to an existing shared memory block
             self._shm = SharedMemory(shm_path, False, size)
+            resource_tracker.unregister(self._shm._name, 'shared_memory')
+            self.opened_shms.append(self._shm)
 
         # Create filelock.
         self.dirname = os.path.dirname(filelock_path)
         os.makedirs(self.dirname, exist_ok=True)
         self.lock = FileLock(filelock_path)
+        print(f'Created {filelock_path}')
 
         self._arr = np.ndarray(3, buffer=self._shm.buf, dtype=np.int32)
         self._arr[0] = 0
         self._arr[1] = -1
         self._arr[2] = True
+        atexit.register(clean, self)
 
     def __del__(self):
         """Destructor clears array that references shm."""
-        if hasattr(self, '_shm') and self._shm is not None:
-            # Close each SharedMemory instance
-            self._shm.close()
-            if self.is_local_leader:
-                # Call unlink only once to release the shared memory
-                self._shm.unlink()
-            else:
-                # Wait for local leader process to execute first
-                sleep(1)
-        if hasattr(self, 'dirname') and self.is_local_leader:
-            if os.path.islink(self.dirname):
-                os.unlink(self.dirname)
-            shutil.rmtree(self.dirname)
+        print(f'calling del sharedmemory')
+        # if hasattr(self, '_shm') and self._shm is not None:
+        #     # Close each SharedMemory instance
+        #     for shm in self.created_shms:
+        #         shm.close()
+        #         shm.unlink()
+        #     for shm in self.opened_shms:
+        #         print(f'calling del create False')
+        #         shm.close()
+        #         resource_tracker.unregister(shm._name, 'shared_memory')
+
+            # self._shm.close()
+            # if self.is_local_leader:
+            #     # Call unlink only once to release the shared memory
+            #     self._shm.unlink()
+            # else:
+            #     # Wait for local leader process to execute first
+            #     sleep(1)
+        # if hasattr(self, 'dirname') and self.is_local_leader:
+        #     if os.path.islink(self.dirname):
+        #         os.unlink(self.dirname)
+        #     shutil.rmtree(self.dirname)
 
     @property
     def num_enter(self) -> int:
@@ -175,7 +193,7 @@ class SharedBarrier:
             self.num_exit += 1
 
 
-def create_shared_memory(name: Optional[str] = None, size: int = 0) -> SharedMemory:
+def create_shared_memory(name: Optional[str] = None, size: int = 0, rank: int = -1) -> SharedMemory:
     """Create a new Shared Memory block or attach to an existing shared memory block.
 
     Args:
@@ -187,8 +205,46 @@ def create_shared_memory(name: Optional[str] = None, size: int = 0) -> SharedMem
     """
     try:
         # Creates a new shared memory block
-        return SharedMemory(name, True, size)
+        return SharedMemory(name, True, size), rank
     except FileExistsError:
         sleep(TICK)
         # Attaches to an existing shared memory block.
-        return SharedMemory(name, False, size)
+        shm = SharedMemory(name, False, size)
+        # resource_tracker.unregister(shm._name, 'shared_memory')
+        return shm, -1
+
+
+class CreateSharedMemory:
+    def __init__(self, name: Optional[str] = None, size: int = 0):
+        print(f"PID: {os.getpid()} Create CreateSharedMemory")
+        self.created_shms = []
+        self.opened_shms = []
+
+        try:
+            # Creates a new shared memory block
+            self._shm = SharedMemory(name, True, size)
+            self.created_shms.append(self._shm)
+        except FileExistsError:
+            sleep(TICK)
+            # Attaches to an existing shared memory block
+            self._shm = SharedMemory(name, False, size)
+            resource_tracker.unregister(self._shm._name, 'shared_memory')
+            self.opened_shms.append(self._shm)
+        atexit.register(clean, self)
+    
+    
+def clean(obj):
+    print(f'PID: {os.getpid()} calling del CreateSharedMemory')
+    try:
+        if hasattr(obj, '_shm') and obj._shm is not None:
+            # Close each SharedMemory instance
+            for shm in obj.created_shms:
+                print(f'PID: {os.getpid()} calling del CreateSharedMemory create True')
+                shm.close()
+                # shm.unlink()
+            for shm in obj.opened_shms:
+                print(f'PID: {os.getpid()} calling del CreateSharedMemory create False')
+                shm.close()
+                # resource_tracker.unregister(shm._name, 'shared_memory')
+    except KeyError:
+        pass
