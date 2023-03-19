@@ -11,7 +11,7 @@ from multiprocessing.shared_memory import SharedMemory
 from threading import Thread
 from time import sleep, time
 from typing import Any, Dict, Iterator, Optional, Tuple
-from multiprocessing import resource_tracker
+# from multiprocessing import resource_tracker
 
 import numpy as np
 import torch
@@ -559,6 +559,7 @@ class StreamingDataset(IterableDataset):
                 ``None``.
         """
         # If the local raw file already exists, this is a no-op.
+        # print(f'In _download_shard_part()')
         raw_filename = os.path.join(self.local, self.split, raw_info.basename)
         if os.path.isfile(raw_filename):
             return
@@ -608,9 +609,11 @@ class StreamingDataset(IterableDataset):
         # shard states only ever go up, so if we're at the downloaded state, it's downloaded.
         state = shard_states[shard_id]
         if state == _ShardState.DOWNLOADED:
+            # print(f'state: {state}')
             return
 
         # Shard is not necessarily downloaded, so check and update state with the lock.
+        # print(f'state: {state}')
         lock.acquire()
         state = shard_states[shard_id]
         if state == _ShardState.UNKNOWN:
@@ -686,6 +689,7 @@ class StreamingDataset(IterableDataset):
         Args:
             state (_PartitionState): The partition state.
         """
+        # print(f'In _download_thread()')
         shard_states_lock, shard_states = self._get_shard_states()
 
         # Download loop.
@@ -785,6 +789,7 @@ class StreamingDataset(IterableDataset):
         """
         # Lazily create the worker barrier's FileLock, which contains a threading Lock, which is
         # unpickleable.
+        # print(f'In __iter__()')
         if not hasattr(self._worker_barrier, 'lock'):
             self._worker_barrier.lock = FileLock(self._worker_barrier.filelock_path)
 
@@ -861,28 +866,28 @@ class StreamingDataset(IterableDataset):
             self._resume_shm = SharedMemory(name)
             assert len(self._resume_shm.buf) == len(data)
 
-    def _cleanup_shared_memory(self, shm: Any, world: World) -> None:
-        """Clean up the shared memory resources.
+    # def _cleanup_shared_memory(self, shm: Any, world: World) -> None:
+    #     """Clean up the shared memory resources.
 
-        Args:
-            shm (Any): A SharedMemory object
-            world (World): World state.
-        """
-        if shm is not None:
-            # Close each SharedMemory instance
-            if self.captain_rank == world.rank:
-                print(f'Karan {world.rank=}')
-                #shm.close()
-                try:
-                    shm.close()
-                    shm.unlink()
-                except KeyError:
-                    print('I am in the except block')
-                    # Calling del second time from main process
-                    pass
-            else:
-                shm.close()
-                resource_tracker.unregister(shm._name, 'shared_memory')
+    #     Args:
+    #         shm (Any): A SharedMemory object
+    #         world (World): World state.
+    #     """
+    #     if shm is not None:
+    #         # Close each SharedMemory instance
+    #         if self.captain_rank == world.rank:
+    #             print(f'Karan {world.rank=}')
+    #             #shm.close()
+    #             try:
+    #                 shm.close()
+    #                 shm.unlink()
+    #             except KeyError:
+    #                 print('I am in the except block')
+    #                 # Calling del second time from main process
+    #                 pass
+    #         else:
+    #             shm.close()
+    #             resource_tracker.unregister(shm._name, 'shared_memory')
 
             """
             try:
