@@ -26,7 +26,7 @@ from streaming.base.format.base.reader import FileInfo
 from streaming.base.hashing import get_hash
 from streaming.base.index import Index, get_index_basename
 from streaming.base.partitioning import get_partitions
-from streaming.base.shared import SharedBarrier, create_shared_memory, CreateSharedMemory
+from streaming.base.shared import SharedBarrier, CreateSharedMemory
 from streaming.base.shuffle import get_shuffle
 from streaming.base.storage import download_file
 from streaming.base.util import wait_for_file_to_exist, wait_for_local_leader
@@ -228,47 +228,11 @@ class StreamingDataset(IterableDataset):
         print(f'{world.rank=}')
         print(f'{self._prefix=}')
         print('#' * 30)
-        self._shared_dir = os.path.join(os.path.sep, 'tmp', 'streaming', self._prefix)
 
         # Should be a unique shared directory per each StreamingDataset instantiation to avoid a
         # conflict between a different StreamingDataset instance on a same machine.
+        self._shared_dir = os.path.join(os.path.sep, 'tmp', 'streaming', self._prefix)
         
-        #import pdb
-        #pdb.set_trace()
-        #sleep(3)
-
-        """
-        start_time = time()
-        while True:
-            self._shared_dir = os.path.join(os.path.sep, 'tmp', 'streaming', self._prefix)
-            if os.path.exists(self._shared_dir):
-                prefix_int = int(seed_rng.integers(1 << 24))
-                self._prefix = f'{prefix_int:06x}'
-            else:
-                break
-            elapsed = time() - start_time
-            # Raise an exception if not finding a unique shared directory in 60 secs
-            if elapsed > 60:
-                raise RuntimeError(''.join([
-                    f'Could not find the unique shared directory, bailing out.',
-                    'Please provide a different `shuffle_seed` value.'
-                ]))
-
-            sleep(TICK)
-
-        # Initialize the distributed package and synchronize all the ranks
-        is_dist_pg_initialized = False
-        if self._rank_world.num_ranks > 1:
-            print(f'streaming dist')
-            if dist.is_available() and not dist.is_initialized():
-                is_dist_pg_initialized = True
-                dist.init_process_group(backend='nccl' if torch.cuda.is_available() and
-                                        dist.is_nccl_available() else 'gloo',
-                                        rank=world.rank,
-                                        world_size=world.num_ranks)
-            dist.barrier()
-
-        """
         # Create the shared memory-backed worker barrier, without its lock, which is unpickleable.
         worker_barrier_filelock_path = os.path.join(self._shared_dir, 'barrier_filelock')
         worker_barrier_shm_path = f'{self._prefix}_barrier'
@@ -283,12 +247,9 @@ class StreamingDataset(IterableDataset):
         # Note: we do not assume that the end of __iter__() will ever be reached, so we need to
         # increment the epoch counter at the start of __iter__() instead of at the end, so we need
         # to track what the next epoch is, not the current epoch.
-        # self._next_epoch_shm, self.captain_rank = create_shared_memory(name=f'{self._prefix}_next_epoch',
-                                                    # size=np.int64().nbytes, rank=world.rank)
-        obj = CreateSharedMemory(name=f'{self._prefix}_next_epoch',
+        next_epoch_shm = CreateSharedMemory(name=f'{self._prefix}_next_epoch',
                                                     size=np.int64().nbytes)
-        self._next_epoch_shm = obj._shm
-        #resource_tracker.unregister(self._next_epoch_shm._name, 'shared_memory')
+        self._next_epoch_shm = next_epoch_shm.shm
         self._next_epoch_arr = np.ndarray(1, buffer=self._next_epoch_shm.buf, dtype=np.int64)
         self._next_epoch_arr[0] = 0
 
@@ -297,18 +258,9 @@ class StreamingDataset(IterableDataset):
 
         # Create or attach shard_states array (tells if each shard is unknown, downloading, or
         # downloaded).
-        # self._shard_states, self.captain_rank = create_shared_memory(name=f'{self._prefix}_shard_states',
-                                                #   size=len(self.shard_sizes) * np.uint8(0).nbytes, rank=world.rank)
-        obj = CreateSharedMemory(name=f'{self._prefix}_shard_states',
+        shard_states_shm = CreateSharedMemory(name=f'{self._prefix}_shard_states',
                                                   size=len(self.shard_sizes) * np.uint8(0).nbytes)
-        self._shard_states = obj._shm
-        #resource_tracker.unregister(self._shard_states._name, 'shared_memory')
-
-        """
-        # Destroy process group, and de-initialize the distributed package
-        if is_dist_pg_initialized:
-            dist.destroy_process_group()
-        """
+        self._shard_states_shm = shard_states_shm.shm
 
     @property
     def next_epoch(self) -> int:
@@ -559,7 +511,6 @@ class StreamingDataset(IterableDataset):
                 ``None``.
         """
         # If the local raw file already exists, this is a no-op.
-        # print(f'In _download_shard_part()')
         raw_filename = os.path.join(self.local, self.split, raw_info.basename)
         if os.path.isfile(raw_filename):
             return
@@ -609,11 +560,9 @@ class StreamingDataset(IterableDataset):
         # shard states only ever go up, so if we're at the downloaded state, it's downloaded.
         state = shard_states[shard_id]
         if state == _ShardState.DOWNLOADED:
-            # print(f'state: {state}')
             return
 
         # Shard is not necessarily downloaded, so check and update state with the lock.
-        # print(f'state: {state}')
         lock.acquire()
         state = shard_states[shard_id]
         if state == _ShardState.UNKNOWN:
@@ -643,7 +592,7 @@ class StreamingDataset(IterableDataset):
         lock = FileLock(self.shard_states_filename)
 
         shard_states = np.ndarray(len(self.shard_sizes),
-                                  buffer=self._shard_states.buf,
+                                  buffer=self._shard_states_shm.buf,
                                   dtype=np.uint8)
 
         return lock, shard_states
@@ -689,7 +638,6 @@ class StreamingDataset(IterableDataset):
         Args:
             state (_PartitionState): The partition state.
         """
-        # print(f'In _download_thread()')
         shard_states_lock, shard_states = self._get_shard_states()
 
         # Download loop.
@@ -789,7 +737,6 @@ class StreamingDataset(IterableDataset):
         """
         # Lazily create the worker barrier's FileLock, which contains a threading Lock, which is
         # unpickleable.
-        # print(f'In __iter__()')
         if not hasattr(self._worker_barrier, 'lock'):
             self._worker_barrier.lock = FileLock(self._worker_barrier.filelock_path)
 
@@ -865,79 +812,3 @@ class StreamingDataset(IterableDataset):
             sleep(TICK)
             self._resume_shm = SharedMemory(name)
             assert len(self._resume_shm.buf) == len(data)
-
-    # def _cleanup_shared_memory(self, shm: Any, world: World) -> None:
-    #     """Clean up the shared memory resources.
-
-    #     Args:
-    #         shm (Any): A SharedMemory object
-    #         world (World): World state.
-    #     """
-    #     if shm is not None:
-    #         # Close each SharedMemory instance
-    #         if self.captain_rank == world.rank:
-    #             print(f'Karan {world.rank=}')
-    #             #shm.close()
-    #             try:
-    #                 shm.close()
-    #                 shm.unlink()
-    #             except KeyError:
-    #                 print('I am in the except block')
-    #                 # Calling del second time from main process
-    #                 pass
-    #         else:
-    #             shm.close()
-    #             resource_tracker.unregister(shm._name, 'shared_memory')
-
-            """
-            try:
-                shm.close()
-                shm.unlink()
-            except FileNotFoundError:
-                pass
-            """
-            """
-            if world.is_local_leader:
-                # Call unlink only once to release the shared memory
-                try:
-                    shm.unlink()
-                except FileNotFoundError:
-                    # File already released
-                    pass
-            else:
-                # Wait for local leader process to execute first
-                sleep(1)
-            """
-
-    """
-    def __del__(self):
-        # Wait for the local rank 0 process
-        print(f'calling del streamingdataset')
-        world = self._rank_world
-        wait_for_local_leader(world)
-
-        # Clean up shared memory resources
-        if hasattr(self, '_next_epoch_shm'):
-            self._cleanup_shared_memory(self._next_epoch_shm, world)
-        if hasattr(self, '_shard_states'):
-            self._cleanup_shared_memory(self._shard_states, world)
-        if hasattr(self, '_resume_shm'):
-            self._cleanup_shared_memory(self._resume_shm, world)
-    """
-
-# def close(world, dataset):
-    #world = world._rank_world
-    #wait_for_local_leader(world)
-    # print(f'Rank {world.rank} PID: {os.getpid()} PPID: {os.getppid()}: calling del streamingdataset')
-
-    # Clean up shared memory resources
-    # if hasattr(dataset, '_next_epoch_shm'):
-    #     dataset._cleanup_shared_memory(dataset._next_epoch_shm, world)
-    #     delattr(dataset, '_next_epoch_shm')
-    # if hasattr(dataset, '_shard_states'):
-    #     dataset._cleanup_shared_memory(dataset._shard_states, world)
-    #     delattr(dataset, '_shard_states')
-
-    # if hasattr(dataset, '_resume_shm'):
-    #     dataset._cleanup_shared_memory(dataset._resume_shm, world)
-    #     delattr(dataset, '_resume_shm')

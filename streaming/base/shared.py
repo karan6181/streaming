@@ -47,24 +47,12 @@ class SharedBarrier:
 
         # Create three int32 fields in shared memory: num_enter, num_exit, flag.
         size = 3 * np.int32(0).nbytes
-
-        # try:
-        #     # Creates a new shared memory block
-        #     self._shm = SharedMemory(shm_path, True, size)
-        #     self.created_shms.append(self._shm)
-        # except FileExistsError:
-        #     sleep(TICK)
-        #     # Attaches to an existing shared memory block
-        #     self._shm = SharedMemory(shm_path, False, size)
-        #     # resource_tracker.unregister(self._shm._name, 'shared_memory')
-        #     self.opened_shms.append(self._shm)
-        
         obj = CreateSharedMemory(shm_path, size)
-        self._shm = obj._shm
+        self._shm = obj.shm
 
         # Create filelock.
-        self.dirname = os.path.dirname(filelock_path)
-        os.makedirs(self.dirname, exist_ok=True)
+        dirname = os.path.dirname(filelock_path)
+        os.makedirs(dirname, exist_ok=True)
         self.lock = FileLock(filelock_path)
         print(f'Created {filelock_path}')
 
@@ -72,32 +60,17 @@ class SharedBarrier:
         self._arr[0] = 0
         self._arr[1] = -1
         self._arr[2] = True
-        atexit.register(clean, self)
 
-    def __del__(self):
-        """Destructor clears array that references shm."""
-        print(f'PID: {os.getpid()} PPID: {os.getppid()} calling del sharedmemory')
-        # if hasattr(self, '_shm') and self._shm is not None:
-        #     # Close each SharedMemory instance
-        #     for shm in self.created_shms:
-        #         shm.close()
-        #         shm.unlink()
-        #     for shm in self.opened_shms:
-        #         print(f'calling del create False')
-        #         shm.close()
-        #         resource_tracker.unregister(shm._name, 'shared_memory')
+        def cleanup():
+            """
+            Directory clean up.
+            """
+            print(f'PID: {os.getpid()} directory cleanup')
+            if os.path.islink(dirname):
+                os.unlink(dirname)
+            shutil.rmtree(dirname, ignore_errors=True)
 
-            # self._shm.close()
-            # if self.is_local_leader:
-            #     # Call unlink only once to release the shared memory
-            #     self._shm.unlink()
-            # else:
-            #     # Wait for local leader process to execute first
-            #     sleep(1)
-        if hasattr(self, 'dirname') and self.is_local_leader:
-            if os.path.islink(self.dirname):
-                os.unlink(self.dirname)
-            shutil.rmtree(self.dirname)
+        atexit.register(cleanup)
 
     @property
     def num_enter(self) -> int:
@@ -196,55 +169,50 @@ class SharedBarrier:
             self.num_exit += 1
 
 
-def create_shared_memory(name: Optional[str] = None, size: int = 0, rank: int = -1) -> SharedMemory:
+class CreateSharedMemory:
     """Create a new Shared Memory block or attach to an existing shared memory block.
 
     Args:
         name (str, optional): A unique shared memory block name. Defaults to None.
         size (int, optional): A size of a shared memory block. Defaults to 0.
-
-    Returns:
-        SharedMemory: An instance of shared memory block
     """
-    try:
-        # Creates a new shared memory block
-        return SharedMemory(name, True, size), rank
-    except FileExistsError:
-        sleep(TICK)
-        # Attaches to an existing shared memory block.
-        shm = SharedMemory(name, False, size)
-        # resource_tracker.unregister(shm._name, 'shared_memory')
-        return shm, -1
-
-
-class CreateSharedMemory:
     def __init__(self, name: Optional[str] = None, size: int = 0):
         print(f"PID: {os.getpid()} Create CreateSharedMemory")
-        # if "shared_memory" in resource_tracker._CLEANUP_FUNCS:
-            # print(f'_CLEANUP_FUNCS')
-            # del resource_tracker._CLEANUP_FUNCS["shared_memory"]
-        self.created_shms = []
-        self.opened_shms = []
+        created_shms = []
+        opened_shms = []
         resource_tracker.register = self.fix_register
         resource_tracker.unregister = self.fix_unregister
 
         try:
             # Creates a new shared memory block
-            self._shm = SharedMemory(name, True, size)
-            self.created_shms.append(self._shm)
+            shm = SharedMemory(name, True, size)
+            created_shms.append(shm)
+            self.shm = shm
         except FileExistsError:
             sleep(TICK)
             # Attaches to an existing shared memory block
-            self._shm = SharedMemory(name, False, size)
-            # resource_tracker.unregister(self._shm._name, 'shared_memory')
-            self.opened_shms.append(self._shm)
-            # resource_tracker._resource_tracker.unregister(self._shm._name, 'shared_memory')
-        # resource_tracker.unregister(self._shm._name, 'shared_memory')
-        if "shared_memory" in resource_tracker._CLEANUP_FUNCS:
-            print(f'_CLEANUP_FUNCS')
-            del resource_tracker._CLEANUP_FUNCS["shared_memory"]
-        atexit.register(clean, self)
+            shm = SharedMemory(name, False, size)
+            opened_shms.append(shm)
+            self.shm = shm
+
+        def cleanup():
+            """
+            Clean up SharedMemory resources.
+            """
+            print(f'PID: {os.getpid()} calling del CreateSharedMemory')
+            # Close each SharedMemory instance
+            for shm in created_shms:
+                print(f'PID: {os.getpid()} calling del CreateSharedMemory create True')
+                shm.close()
+                shm.unlink()
+            for shm in opened_shms:
+                print(f'PID: {os.getpid()} calling del CreateSharedMemory create False')
+                shm.close()
+
+        atexit.register(cleanup)
     
+    # Monkey-patched "multiprocessing.resource_tracker" to avoid unwanted resource tracker warnings.
+    # PR to remove resource tracker unlinking: https://github.com/python/cpython/pull/15989
     def fix_register(self, name, rtype):
         if rtype == "shared_memory":
             return
@@ -254,18 +222,3 @@ class CreateSharedMemory:
         if rtype == "shared_memory":
             return
         return resource_tracker._resource_tracker.unregister(self, name, rtype)
-    
-    
-def clean(obj):
-    print(f'PID: {os.getpid()} calling del CreateSharedMemory')
-    if hasattr(obj, '_shm') and obj._shm is not None:
-        # Close each SharedMemory instance
-        for shm in obj.created_shms:
-            print(f'PID: {os.getpid()} calling del CreateSharedMemory create True')
-            shm.close()
-            shm.unlink()
-        for shm in obj.opened_shms:
-            print(f'PID: {os.getpid()} calling del CreateSharedMemory create False')
-            shm.close()
-            
-            # resource_tracker.unregister(shm._name, 'shared_memory')
