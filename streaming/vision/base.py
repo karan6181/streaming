@@ -81,6 +81,7 @@ class StreamingVisionDataset(StreamingDataset, VisionDataset):
             partitioned over the workers. Defaults to ``None``.
         partition_algo (str): Which partitioning algorithm to use. Defaults to ``orig``.
         shuffle_algo (str): Which shuffling algorithm to use. Defaults to ``py2s``.
+        prefix_int (int): Seed for communication across local ranks. Defaults to ``1234``.
     """
 
     def __init__(self,
@@ -101,7 +102,8 @@ class StreamingVisionDataset(StreamingDataset, VisionDataset):
                  num_canonical_nodes: Optional[int] = None,
                  batch_size: Optional[int] = None,
                  partition_algo: str = 'orig',
-                 shuffle_algo: str = 'py2s') -> None:
+                 shuffle_algo: str = 'py2s',
+                 prefix_int: int = 1234) -> None:
         super().__init__(local=local,
                          remote=remote,
                          split=split,
@@ -115,7 +117,8 @@ class StreamingVisionDataset(StreamingDataset, VisionDataset):
                          num_canonical_nodes=num_canonical_nodes,
                          batch_size=batch_size,
                          partition_algo=partition_algo,
-                         shuffle_algo=shuffle_algo)
+                         shuffle_algo=shuffle_algo,
+                         prefix_int=prefix_int)
 
         has_transforms = transforms is not None
         has_separate_transform = transform is not None or target_transform is not None
@@ -177,6 +180,7 @@ class StreamingImageClassDataset(StreamingVisionDataset):
             partitioned over the workers. Defaults to ``None``.
         partition_algo (str): Which partitioning algorithm to use. Defaults to ``orig``.
         shuffle_algo (str): Which shuffling algorithm to use. Defaults to ``py2s``.
+        prefix_int (int): Seed for communication across local ranks. Defaults to ``1234``.
     """
 
     def __init__(self,
@@ -196,7 +200,8 @@ class StreamingImageClassDataset(StreamingVisionDataset):
                  num_canonical_nodes: Optional[int] = None,
                  batch_size: Optional[int] = None,
                  partition_algo: str = 'orig',
-                 shuffle_algo: str = 'py2s') -> None:
+                 shuffle_algo: str = 'py2s',
+                 prefix_int: int = 1234) -> None:
         super().__init__(local=local,
                          remote=remote,
                          split=split,
@@ -213,4 +218,5 @@ class StreamingImageClassDataset(StreamingVisionDataset):
                          num_canonical_nodes=num_canonical_nodes,
                          batch_size=batch_size,
                          partition_algo=partition_algo,
-                         shuffle_algo=shuffle_algo)
+                         shuffle_algo=shuffle_algo,
+                         prefix_int=prefix_int)

@@ -47,8 +47,8 @@ class SharedBarrier:
 
         # Create three int32 fields in shared memory: num_enter, num_exit, flag.
         size = 3 * np.int32(0).nbytes
-        obj = CreateSharedMemory(shm_path, size)
-        self._shm = obj.shm
+        shared_barrier_shm = CreateSharedMemory(shm_path, size)
+        self._shm = shared_barrier_shm.shm
 
         # Create filelock.
         dirname = os.path.dirname(filelock_path)

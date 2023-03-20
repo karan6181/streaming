@@ -45,4 +45,5 @@ class StreamingCIFAR10(StreamingImageClassDataset):
             partitioned over the workers. Defaults to ``None``.
         partition_algo (str): Which partitioning algorithm to use. Defaults to ``orig``.
         shuffle_algo (str): Which shuffling algorithm to use. Defaults to ``py2s``.
+        prefix_int (int): Seed for communication across local ranks. Defaults to ``1234``.
     """
