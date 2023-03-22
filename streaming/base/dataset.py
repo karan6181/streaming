@@ -11,7 +11,6 @@ from multiprocessing.shared_memory import SharedMemory
 from threading import Thread
 from time import sleep, time
 from typing import Any, Dict, Iterator, Optional, Tuple
-# from multiprocessing import resource_tracker
 
 import numpy as np
 import torch
@@ -164,8 +163,6 @@ class StreamingDataset(IterableDataset):
         self.shuffle_algo = shuffle_algo
         self.prefix_int = prefix_int
 
-        print(f'PID: {os.getpid()}, PPID: {os.getppid()}')
-
         if self.download_retry < 0:
             raise ValueError('Parameter ``download_retry`` must be non-negative')
         if self.download_timeout < 0:
@@ -185,8 +182,6 @@ class StreamingDataset(IterableDataset):
         # different values for these fields. We are saving the rank World here because we cannot
         # instantiate a World inside the StreamingDataset destructor.
         self._rank_world = world = World()
-
-        # atexit.register(close, world, self)
 
         # Seed is set below.
         self.num_canonical_nodes = num_canonical_nodes
@@ -224,11 +219,6 @@ class StreamingDataset(IterableDataset):
         # prefix_int = int(seed_rng.integers(1 << 24))
         prefix_int = int(seed_rng.integers(self.prefix_int))
         self._prefix = f'{prefix_int:06x}'
-        print('#' * 30)
-        print(f'{world.num_ranks=}')
-        print(f'{world.rank=}')
-        print(f'{self._prefix=}')
-        print('#' * 30)
 
         # Should be a unique shared directory per each StreamingDataset instantiation to avoid a
         # conflict between a different StreamingDataset instance on a same machine.
@@ -237,8 +227,7 @@ class StreamingDataset(IterableDataset):
         # Create the shared memory-backed worker barrier, without its lock, which is unpickleable.
         worker_barrier_filelock_path = os.path.join(self._shared_dir, 'barrier_filelock')
         worker_barrier_shm_path = f'{self._prefix}_barrier'
-        self._worker_barrier = SharedBarrier(worker_barrier_filelock_path, worker_barrier_shm_path,
-                                             world.is_local_leader)
+        self._worker_barrier = SharedBarrier(worker_barrier_filelock_path, worker_barrier_shm_path)
 
         # Remove the lock that makes it unpickleable
         del self._worker_barrier.lock

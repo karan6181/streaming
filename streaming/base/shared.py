@@ -35,12 +35,9 @@ class SharedBarrier:
     Args:
         filelock_path (str): Path to lock file on local filesystem.
         shm_path (str): Shared memory object name in /dev/shm.
-        is_local_leader (bool): Is a local leader process or not
     """
 
-    def __init__(self, filelock_path: str, shm_path: str, is_local_leader: bool) -> None:
-        print("Create SharedBarrier")
-        self.is_local_leader = is_local_leader
+    def __init__(self, filelock_path: str, shm_path: str) -> None:
         self.filelock_path = filelock_path
         self.created_shms = []
         self.opened_shms = []
@@ -54,7 +51,6 @@ class SharedBarrier:
         dirname = os.path.dirname(filelock_path)
         os.makedirs(dirname, exist_ok=True)
         self.lock = FileLock(filelock_path)
-        print(f'Created {filelock_path}')
 
         self._arr = np.ndarray(3, buffer=self._shm.buf, dtype=np.int32)
         self._arr[0] = 0
@@ -65,7 +61,6 @@ class SharedBarrier:
             """
             Directory clean up.
             """
-            print(f'PID: {os.getpid()} directory cleanup')
             if os.path.islink(dirname):
                 os.unlink(dirname)
             shutil.rmtree(dirname, ignore_errors=True)
@@ -177,7 +172,6 @@ class CreateSharedMemory:
         size (int, optional): A size of a shared memory block. Defaults to 0.
     """
     def __init__(self, name: Optional[str] = None, size: int = 0):
-        print(f"PID: {os.getpid()} Create CreateSharedMemory")
         created_shms = []
         opened_shms = []
         resource_tracker.register = self.fix_register
@@ -199,14 +193,11 @@ class CreateSharedMemory:
             """
             Clean up SharedMemory resources.
             """
-            print(f'PID: {os.getpid()} calling del CreateSharedMemory')
             # Close each SharedMemory instance
             for shm in created_shms:
-                print(f'PID: {os.getpid()} calling del CreateSharedMemory create True')
                 shm.close()
                 shm.unlink()
             for shm in opened_shms:
-                print(f'PID: {os.getpid()} calling del CreateSharedMemory create False')
                 shm.close()
 
         atexit.register(cleanup)
