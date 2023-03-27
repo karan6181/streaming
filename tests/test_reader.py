@@ -1,6 +1,7 @@
 # Copyright 2023 MosaicML Streaming authors
 # SPDX-License-Identifier: Apache-2.0
 
+import atexit
 import logging
 import os
 import shutil
@@ -33,7 +34,9 @@ def mds_dataset_dir():
                           size_limit=size_limit)
         yield remote_dir, local_dir
     finally:
+        print(f'cleaning mds_dataset_dir')
         mock_dir.cleanup()  # pyright: ignore
+        atexit._run_exitfuncs()
 
 
 @pytest.mark.parametrize('batch_size', [None, 1, 2])
