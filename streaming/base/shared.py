@@ -13,7 +13,7 @@ import shutil
 from multiprocessing import resource_tracker  # pyright: ignore
 from multiprocessing.shared_memory import SharedMemory
 from time import sleep
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 from filelock import FileLock
@@ -166,80 +166,93 @@ class CreateSharedMemory:
     """Create a new Shared Memory block or attach to an existing shared memory block.
 
     Args:
-        name (str, optional): A unique shared memory block name. Defaults to None.
+        name (Optional[str], optional): A unique shared memory block name. Defaults to None.
+        create (Optional[bool], optional): Creates a new shared memory block or attaches to an existing shared memory block. Defaults to None.
         size (int, optional): A size of a shared memory block. Defaults to 0.
+        auto_cleanup (bool, optional): Register atexit handler for cleanup or not. Defaults to True.
     """
 
-    def __init__(self, name: Optional[str] = None, create: Optional[bool] = None, size: int = 0):
-        created_shms = []
-        opened_shms = []
+    def __init__(self,
+                 name: Optional[str] = None,
+                 create: Optional[bool] = None,
+                 size: int = 0,
+                 auto_cleanup: bool = True):
+
+        self.created_shms = []
+        self.opened_shms = []
         shm = None
-        # resource_tracker.register = self.fix_register
-        # resource_tracker.unregister = self.fix_unregister
+        original_register = resource_tracker.register
+        resource_tracker.register = self.fix_register
 
-        if create == True:
-            shm = SharedMemory(name, create, size)
-            created_shms.append(shm)
-            # self.shm = shm
-        elif create == False:
-            shm = SharedMemory(name, create, size)
-            opened_shms.append(shm)
-            # self.shm = shm
-        else:
-            try:
+        try:
+            if create is True:
                 # Creates a new shared memory block
-                shm = SharedMemory(name, True, size)
-                created_shms.append(shm)
-                # self.shm = shm
-            except FileExistsError:
-                sleep(TICK)
+                shm = SharedMemory(name, create, size)
+                self.created_shms.append(shm)
+            elif create is False:
                 # Attaches to an existing shared memory block
-                shm = SharedMemory(name, False, size)
-                opened_shms.append(shm)
-                # self.shm = shm
-        self.shm = shm
+                shm = SharedMemory(name, create, size)
+                self.opened_shms.append(shm)
+            else:
+                try:
+                    # Creates a new shared memory block
+                    shm = SharedMemory(name, True, size)
+                    self.created_shms.append(shm)
+                except FileExistsError:
+                    sleep(TICK)
+                    # Attaches to an existing shared memory block
+                    shm = SharedMemory(name, False, size)
+                    self.opened_shms.append(shm)
+            self.shm = shm
+        finally:
+            resource_tracker.register = original_register
 
-        def cleanup():
-            """Clean up SharedMemory resources."""
-            # Close each SharedMemory instance
-            try:
-                for shm in created_shms:
-                    shm.close()
-                    shm.unlink()
-                for shm in opened_shms:
-                    shm.close()
-            # skip the error if child process cleans the memory instead
-            except FileNotFoundError:
-                pass
-
-        atexit.register(cleanup)
+        if auto_cleanup:
+            atexit.register(self.cleanup)
 
     # Monkey-patched "multiprocessing.resource_tracker" to avoid unwanted resource tracker warnings.
     # PR to remove resource tracker unlinking: https://github.com/python/cpython/pull/15989
-    # def fix_register(self, name: str, rtype: str) -> Any:
-    #     """Skip registering resource tracking for shared memory.
+    def fix_register(self, name: str, rtype: str) -> Any:
+        """Skip registering resource tracking for shared memory.
 
-    #     Args:
-    #         name (str): Name of a shared memory
-    #         rtype (str): type TODO
+        Args:
+            name (str): Name of a shared memory
+            rtype (str): Name of a resource type
 
-    #     Returns:
-    #         Any: TODO
-    #     """
-    #     if rtype == 'shared_memory':
-    #         return
-    #     return resource_tracker._resource_tracker.register(self, name, rtype)
+        Returns:
+            Any: resource tracker or None
+        """
+        if rtype == 'shared_memory':
+            return
+        return resource_tracker._resource_tracker.register(self, name, rtype)
 
-    # def fix_unregister(self, name: str, rtype: str) -> Any:
-    #     """Skip un-registering resource tracking for shared memory.
+    def fix_unregister(self, name: str, rtype: str) -> Any:
+        """Skip un-registering resource tracking for shared memory.
 
-    #     Args:
-    #         name (str): Name of a shared memory
-    #         rtype (str): TODO
+        Args:
+            name (str): Name of a shared memory
+            rtype (str): Name of a resource type
 
-    #     Returns:
-    #         Any: TODO
-    #     """
-    #     if rtype == 'shared_memory':
-    #         return
-    #     return resource_tracker._resource_tracker.unregister(self, name, rtype)
+        Returns:
+            Any: resource tracker or None
+        """
+        if rtype == 'shared_memory':
+            return
+        return resource_tracker._resource_tracker.unregister(self, name, rtype)
+
+    def cleanup(self):
+        """Clean up SharedMemory resources."""
+        original_unregister = resource_tracker.unregister
+        resource_tracker.unregister = self.fix_unregister
+        # Close each SharedMemory instance
+        try:
+            for shm in self.created_shms:
+                shm.close()
+                shm.unlink()
+            for shm in self.opened_shms:
+                shm.close()
+        # skip the error if a child process already cleaned up the SharedMemory
+        except FileNotFoundError:
+            pass
+        finally:
+            resource_tracker.unregister = original_unregister

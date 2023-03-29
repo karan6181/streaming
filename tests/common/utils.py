@@ -1,7 +1,6 @@
 # Copyright 2023 MosaicML Streaming authors
 # SPDX-License-Identifier: Apache-2.0
 
-import atexit
 import json
 import os
 import socket
@@ -22,7 +21,6 @@ def local_remote_dir() -> Any:
         yield mock_local_dir, mock_remote_dir
     finally:
         mock_dir.cleanup()  # pyright: ignore
-        atexit._run_exitfuncs()
 
 
 @pytest.fixture(scope='function')
@@ -36,7 +34,6 @@ def compressed_local_remote_dir() -> Any:
         yield mock_compressed_dir, mock_local_dir, mock_remote_dir
     finally:
         mock_dir.cleanup()  # pyright: ignore
-        atexit._run_exitfuncs()
 
 
 def get_config_in_bytes(format: str,

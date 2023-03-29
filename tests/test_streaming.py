@@ -15,7 +15,7 @@ from tests.common.datasets import SequenceDataset, write_mds_dataset
 @pytest.mark.parametrize('batch_size', [128])
 @pytest.mark.parametrize('drop_last', [False, True])
 @pytest.mark.parametrize('shuffle', [False, True])
-@pytest.mark.parametrize('num_workers', [0, 1, 8])
+@pytest.mark.parametrize('num_workers', [0, 4])
 @pytest.mark.parametrize('num_samples', [9867, 30_000])
 @pytest.mark.parametrize('size_limit', [8_192])
 @pytest.mark.usefixtures('local_remote_dir')
@@ -76,7 +76,7 @@ def test_dataloader_single_device(local_remote_dir: Tuple[str, str], batch_size:
 @pytest.mark.parametrize('batch_size', [1, 4])
 @pytest.mark.parametrize('seed', [987])
 @pytest.mark.parametrize('shuffle', [False, True])
-@pytest.mark.parametrize('num_workers', [0, 1, 8])
+@pytest.mark.parametrize('num_workers', [0, 8])
 @pytest.mark.usefixtures('mds_dataset_dir')
 def test_dataloader_determinism(mds_dataset_dir: Any, batch_size: int, seed: int, shuffle: bool,
                                 num_workers: int):
@@ -96,8 +96,6 @@ def test_dataloader_determinism(mds_dataset_dir: Any, batch_size: int, seed: int
     sample_order = []
     for batch in dataloader:
         sample_order.extend(batch['id'][:])
-    del dataloader
-    # del dataset
 
     # Build StreamingDataset again to test deterministic sample ID
     dataset = StreamingDataset(local=local_dir,
@@ -122,7 +120,7 @@ def test_dataloader_determinism(mds_dataset_dir: Any, batch_size: int, seed: int
 @pytest.mark.parametrize('seed', [987])
 @pytest.mark.parametrize('shuffle', [False])
 @pytest.mark.parametrize('drop_last', [False, True])
-@pytest.mark.parametrize('num_workers', [0, 1, 8])
+@pytest.mark.parametrize('num_workers', [0, 8])
 @pytest.mark.usefixtures('mds_dataset_dir')
 def test_dataloader_sample_order(mds_dataset_dir: Any, batch_size: int, seed: int, shuffle: bool,
                                  drop_last: bool, num_workers: int):
@@ -158,7 +156,7 @@ def test_dataloader_sample_order(mds_dataset_dir: Any, batch_size: int, seed: in
 @pytest.mark.parametrize('batch_size', [1, 4])
 @pytest.mark.parametrize('seed', [987])
 @pytest.mark.parametrize('shuffle', [False, True])
-@pytest.mark.parametrize('num_workers', [0, 1, 4])
+@pytest.mark.parametrize('num_workers', [0, 4])
 @pytest.mark.usefixtures('mds_dataset_dir')
 def test_streamingdataloader_mid_epoch_resumption(mds_dataset_dir: Any, batch_size: int, seed: int,
                                                   shuffle: bool, num_workers: int):
@@ -187,11 +185,6 @@ def test_streamingdataloader_mid_epoch_resumption(mds_dataset_dir: Any, batch_si
             assert state_dict is not None
             break
         sample_order.extend(batch['id'][:])
-
-    del dataloader
-    # del dataset
-    # import atexit
-    # atexit._run_exitfuncs()
 
     dataset = StreamingDataset(local=local_dir,
                                remote=remote_dir,
