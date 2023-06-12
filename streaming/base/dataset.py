@@ -1058,7 +1058,9 @@ class StreamingDataset(Array, IterableDataset):
 
                 # On success, break out.
                 break
-            except:
+            except Exception as err:
+                print(f'{shard_id=}, {shard_sample_id=}')
+                print(err)
                 # Fallback: ensure the shard is downloaded, then try to access the sample again.
                 # Loops because it may become evicted in the meantime.
                 self.download_shard(shard_id)
