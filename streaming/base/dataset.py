@@ -290,6 +290,7 @@ class StreamingDataset(Array, IterableDataset):
         # Global arguments (which do not live in Streams).
         self.predownload = predownload
         self.cache_limit = cache_limit
+        print(f'{self.cache_limit=}')
         self.partition_algo = partition_algo
         self.num_canonical_nodes = num_canonical_nodes
         self.batch_size = batch_size
@@ -364,6 +365,7 @@ class StreamingDataset(Array, IterableDataset):
 
         # Check that cache limit is possible.
         if self.cache_limit:
+            print(f'StreamingDataset init cache_limit')
             if isinstance(self.cache_limit, str):
                 self.cache_limit = bytes_to_int(self.cache_limit)
             min_cache_usage = sum(map(lambda stream: stream.get_index_size(), streams))
@@ -987,6 +989,7 @@ class StreamingDataset(Array, IterableDataset):
                 # This means both the raw and zip forms of the shard due to decompressing.
                 shard_full_size = shard.get_full_size()
                 while self.cache_limit < self.cache_usage + shard_full_size:
+                    print(f'starts evicting')
                     self._evict_coldest_shard()
 
             # Calculate and apply the persistent change in cache usage, which depends on
