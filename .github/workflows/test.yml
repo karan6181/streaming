@@ -41,4 +41,5 @@ jobs:
           set -ex
           python -m pip install --upgrade pip wheel
           ulimit -n
+          cat /etc/security/limits.conf
           sudo ulimit -n unlimited
