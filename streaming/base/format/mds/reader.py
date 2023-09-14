@@ -118,7 +118,7 @@ class MDSReader(JointReader):
         Returns:
             bytes: Sample data.
         """
-        filename = os.path.join(self.dirname, self.split, self.raw_data.basename)
+        filename = os.path.normpath(os.path.join(self.dirname, self.split, self.raw_data.basename))
         offset = (1 + idx) * 4
         with open(filename, 'rb', 0) as fp:
             fp.seek(offset)

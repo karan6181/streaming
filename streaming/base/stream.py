@@ -303,8 +303,9 @@ class Stream:
         if self.remote is None:
             remote = None
         else:
-            remote = os.path.join(self.remote, self.split, from_basename)
-        local = os.path.join(self.local, self.split, to_basename or from_basename)
+            remote = os.path.normpath(os.path.join(self.remote, self.split, from_basename))
+        local = os.path.normpath(os.path.join(self.local, self.split, to_basename or
+                                              from_basename))
 
         # Attempt to download, possibly repeating on failure.
         errors = []
@@ -375,11 +376,12 @@ class Stream:
         """
         # Has raw?
         delta = 0
-        raw_filename = os.path.join(self.local, self.split, raw_info.basename)
+        raw_filename = os.path.normpath(os.path.join(self.local, self.split, raw_info.basename))
         if os.path.isfile(raw_filename):
             # Has raw.
             if zip_info and not self.safe_keep_zip:
-                zip_filename = os.path.join(self.local, self.split, zip_info.basename)
+                zip_filename = os.path.normpath(
+                    os.path.join(self.local, self.split, zip_info.basename))
                 if os.path.isfile(zip_filename):
                     # If don't keep zip and it has a zip, drop the zip.
                     os.remove(zip_filename)
@@ -388,7 +390,8 @@ class Stream:
             # Missing raw. Uses zip?
             if zip_info:
                 # Ensure has zip.
-                zip_filename = os.path.join(self.local, self.split, zip_info.basename)
+                zip_filename = os.path.normpath(
+                    os.path.join(self.local, self.split, zip_info.basename))
                 if not os.path.isfile(zip_filename):
                     self._download_file(zip_info.basename)
                     delta += zip_info.bytes
@@ -435,7 +438,8 @@ class Stream:
         """
         # Download the index file if it does not exist locally.
         basename = get_index_basename()
-        filename = os.path.join(self.local, self.split, basename)  # pyright: ignore
+        filename = os.path.normpath(os.path.join(self.local, self.split,
+                                                 basename))  # pyright: ignore
         if not os.path.exists(filename):
             if world.is_local_leader:
                 if self.remote:
@@ -452,8 +456,8 @@ class Stream:
             else:
                 wait_for_file_to_exist(
                     filename, TICK, self.download_timeout,
-                    f'Index file {os.path.join(self.remote or "", self.split or "", basename)} ' +
-                    f'-> {filename} took too long to download. Either increase the ' +
+                    f'Index file {os.path.normpath(os.path.join(self.remote or "", self.split or "", basename))} '
+                    + f'-> {filename} took too long to download. Either increase the ' +
                     f'`download_timeout` value or check the other traceback.')
 
         # Load the index.
@@ -484,7 +488,7 @@ class Stream:
             cache_usage_per_shard (NDArray[np.int64]): Cache usage per shard of this stream.
         """
         # List the cache directory (so that we hit the filesystem once).
-        local_dirname = os.path.join(self.local, self.split)
+        local_dirname = os.path.normpath(os.path.join(self.local, self.split))
         listing = set()
         for dirname, _, subfiles in os.walk(local_dirname):
             for subfile in subfiles:
@@ -501,5 +505,5 @@ class Stream:
         Returns:
             int: Size in bytes.
         """
-        filename = os.path.join(self.local, self.split, get_index_basename())
+        filename = os.path.normpath(os.path.join(self.local, self.split, get_index_basename()))
         return os.stat(filename).st_size

@@ -109,13 +109,15 @@ class JSONReader(SplitReader):
         Returns:
             bytes: Sample data.
         """
-        meta_filename = os.path.join(self.dirname, self.split, self.raw_meta.basename)
+        meta_filename = os.path.normpath(
+            os.path.join(self.dirname, self.split, self.raw_meta.basename))
         offset = (1 + idx) * 4
         with open(meta_filename, 'rb', 0) as fp:
             fp.seek(offset)
             pair = fp.read(8)
             begin, end = np.frombuffer(pair, np.uint32)
-        data_filename = os.path.join(self.dirname, self.split, self.raw_data.basename)
+        data_filename = os.path.normpath(
+            os.path.join(self.dirname, self.split, self.raw_data.basename))
         with open(data_filename, 'rb', 0) as fp:
             fp.seek(begin)
             data = fp.read(end - begin)

@@ -94,7 +94,7 @@ class Reader(Array, ABC):
         """
         size = 0
         for raw_info, _ in self.file_pairs:
-            filename = os.path.join(self.dirname, self.split, raw_info.basename)
+            filename = os.path.normpath(os.path.join(self.dirname, self.split, raw_info.basename))
             if os.path.exists(filename):
                 os.remove(filename)
                 size += raw_info.bytes
@@ -109,7 +109,8 @@ class Reader(Array, ABC):
         size = 0
         for _, zip_info in self.file_pairs:
             if zip_info:
-                filename = os.path.join(self.dirname, self.split, zip_info.basename)
+                filename = os.path.normpath(
+                    os.path.join(self.dirname, self.split, zip_info.basename))
                 if os.path.exists(filename):
                     os.remove(filename)
                     size += zip_info.bytes
@@ -140,11 +141,13 @@ class Reader(Array, ABC):
         zip_files_present = 0
         for raw_info, zip_info in self.file_pairs:
             if raw_info:
-                filename = os.path.join(self.dirname, self.split, raw_info.basename)
+                filename = os.path.normpath(
+                    os.path.join(self.dirname, self.split, raw_info.basename))
                 if filename in listing:
                     raw_files_present += 1
             if zip_info:
-                filename = os.path.join(self.dirname, self.split, zip_info.basename)
+                filename = os.path.normpath(
+                    os.path.join(self.dirname, self.split, zip_info.basename))
                 if filename in listing:
                     zip_files_present += 1
 

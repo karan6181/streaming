@@ -443,7 +443,8 @@ class StreamingDataset(Array, IterableDataset):
             stream_shards = stream.get_shards(world)
             num_stream_samples = sum(map(len, stream_shards))
             if not num_stream_samples:
-                index_filename = os.path.join(stream.local, stream.split, get_index_basename())
+                index_filename = os.path.normpath(
+                    os.path.join(stream.local, stream.split, get_index_basename()))
                 raise RuntimeError(f'Stream contains no samples: {index_filename}.')
             stream_per_shard += [stream_id] * len(stream_shards)
             self.shard_offset_per_stream[stream_id] = len(self.shards)
@@ -1091,7 +1092,8 @@ class StreamingDataset(Array, IterableDataset):
 
             # We may need to decompress the shard (if local dir just contains zips).
             raw_info, _ = shard.file_pairs[0]  # Each file pair is present in the same way.
-            raw_filename = os.path.join(stream.local, stream.split, raw_info.basename)  # Find raw.
+            raw_filename = os.path.normpath(
+                os.path.join(stream.local, stream.split, raw_info.basename))  # Find raw.
             if not os.path.isfile(raw_filename):  # Is raw missing?
                 self._shard_states[shard_id] = _ShardState.PREPARING  # Lock the shard.
                 lock.release()  # Unblock other workers.
