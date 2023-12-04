@@ -355,8 +355,8 @@ def _merge_index_from_list(index_file_urls: List[Union[str, Tuple[str, str]]],
             cu.upload_file(index_basename)
 
         # Clean up
-        if not keep_local:
-            shutil.rmtree(cu.local, ignore_errors=True)
+        # if not keep_local:
+        #     shutil.rmtree(cu.local, ignore_errors=True)
 
 
 def _merge_index_from_root(out: Union[str, Tuple[str, str]],

@@ -5,7 +5,7 @@
 
 import logging
 import os
-import shutil
+# import shutil
 from collections.abc import Iterable
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
@@ -282,8 +282,8 @@ def dataframe_to_mds(dataframe: DataFrame,
         index_files = [(row['mds_path_local'], row['mds_path_remote']) for row in partitions]
         do_merge_index(index_files, out, keep_local=keep_local_files, download_timeout=60)
 
-    if not keep_local_files:
-        shutil.rmtree(cu.local, ignore_errors=True)
+    # if not keep_local_files:
+    #     shutil.rmtree(cu.local, ignore_errors=True)
 
     sum_fail_count = 0
     for row in partitions:
