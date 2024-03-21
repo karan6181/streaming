@@ -90,7 +90,7 @@ extra_deps['docs'] = [
     'pypandoc==1.13',
     'sphinx-argparse==0.4.0',
     'sphinx-copybutton==0.5.2',
-    'sphinx==6.2.1',
+    'sphinx==7.2.6',
     'sphinx-tabs==3.4.5',
 ]
 
